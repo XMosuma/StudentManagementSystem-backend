@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey,Float
 from database import Base
 
 class StudentDB(Base):
@@ -47,4 +47,34 @@ class VideoProgressDB(Base):
     topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
     title = Column(String)
     video_url = Column(String)
-    status = Column(String, default="watching")  # watching | completed
+    status = Column(String, default="watching")
+
+
+#Monthly stipend settings per student
+class StipendDB(Base):
+    __tablename__ = "stipends"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+    amount = Column(Float, default=7000.0)
+    month = Column(String)
+
+#Budget categories
+class BudgetCategoryDB(Base):
+    __tablename__ = "budget_categories"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    name = Column(String)
+    limit = Column(Float, default=0.0)
+    is_default = Column(Boolean, default=False)
+
+#Expenses
+class ExpenseDB(Base):
+    __tablename__ = "expenses"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    category_id = Column(Integer, ForeignKey("budget_categories.id"))
+    category_name = Column(String)
+    amount = Column(Float)
+    description = Column(String, nullable=True)
+    date = Column(String)
+    month = Column(String)

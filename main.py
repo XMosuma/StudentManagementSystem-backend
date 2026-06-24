@@ -226,7 +226,7 @@ def add_topic(topic: TopicCreate, db: Session = Depends(get_db)):
     youtube_url = f"https://www.youtube.com/results?search_query={keyword}+tutorial"
 
     # =====================
-    # 🔑 YouTube API
+    #YouTube API
     # =====================
     # import requests
     # YOUTUBE_API_KEY = "YOUR_API_KEY_HERE"
@@ -308,3 +308,218 @@ def get_student_progress(user_id: int, db: Session = Depends(get_db)):
         "topics": [{"id": t.id, "name": t.name, "w3schools_url": t.w3schools_url, "youtube_url": t.youtube_url} for t in topics],
         "videos": [{"id": v.id, "title": v.title, "video_url": v.video_url, "status": v.status} for v in videos]
     }
+
+# =====================
+#BUDGET SCHEMAS
+# =====================
+
+class StipendUpdate(BaseModel):
+    amount: float
+    month: str
+
+class BudgetCategoryCreate(BaseModel):
+    user_id: int
+    name: str
+    limit: float = 0.0
+    is_default: bool = False
+
+class BudgetCategory(BudgetCategoryCreate):
+    id: int
+    class Config:
+        from_attributes = True
+
+class ExpenseCreate(BaseModel):
+    user_id: int
+    category_id: int
+    category_name: str
+    amount: float
+    description: Optional[str] = None
+    date: str
+    month: str
+
+class Expense(ExpenseCreate):
+    id: int
+    class Config:
+        from_attributes = True
+
+# =====================
+#STIPEND ROUTES
+# =====================
+
+@app.get("/stipend/{user_id}")
+def get_stipend(user_id: int, db: Session = Depends(get_db)):
+    stipend = db.query(models.StipendDB).filter(
+        models.StipendDB.user_id == user_id
+    ).first()
+    if not stipend:
+        #create default stipend
+        from datetime import datetime
+        month = datetime.now().strftime("%Y-%m")
+        stipend = models.StipendDB(user_id=user_id, amount=7000.0, month=month)
+        db.add(stipend)
+        db.commit()
+        db.refresh(stipend)
+    return {"id": stipend.id, "amount": stipend.amount, "month": stipend.month}
+
+@app.put("/stipend/{user_id}")
+def update_stipend(user_id: int, data: StipendUpdate, db: Session = Depends(get_db)):
+    stipend = db.query(models.StipendDB).filter(
+        models.StipendDB.user_id == user_id
+    ).first()
+    if stipend:
+        stipend.amount = data.amount
+        stipend.month = data.month
+    else:
+        stipend = models.StipendDB(user_id=user_id, amount=data.amount, month=data.month)
+        db.add(stipend)
+    db.commit()
+    return {"message": "Stipend updated"}
+
+# =====================
+#BUDGET CATEGORY ROUTES
+# =====================
+
+@app.get("/budget/categories/{user_id}", response_model=List[BudgetCategory])
+def get_categories(user_id: int, db: Session = Depends(get_db)):
+    categories = db.query(models.BudgetCategoryDB).filter(
+        models.BudgetCategoryDB.user_id == user_id
+    ).all()
+    if not categories:
+        #create default categories
+        defaults = ["Food", "Transport", "Entertainment", "Education", "Clothing", "Other"]
+        for name in defaults:
+            cat = models.BudgetCategoryDB(
+                user_id=user_id, name=name, limit=0.0, is_default=True
+            )
+            db.add(cat)
+        db.commit()
+        categories = db.query(models.BudgetCategoryDB).filter(
+            models.BudgetCategoryDB.user_id == user_id
+        ).all()
+    return categories
+
+@app.post("/budget/categories", response_model=BudgetCategory)
+def add_category(category: BudgetCategoryCreate, db: Session = Depends(get_db)):
+    new_cat = models.BudgetCategoryDB(**category.dict())
+    db.add(new_cat)
+    db.commit()
+    db.refresh(new_cat)
+    return new_cat
+
+@app.put("/budget/categories/{category_id}")
+def update_category_limit(category_id: int, limit: float, db: Session = Depends(get_db)):
+    cat = db.query(models.BudgetCategoryDB).filter(
+        models.BudgetCategoryDB.id == category_id
+    ).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    cat.limit = limit
+    db.commit()
+    return {"message": "Limit updated"}
+
+@app.delete("/budget/categories/{category_id}")
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    cat = db.query(models.BudgetCategoryDB).filter(
+        models.BudgetCategoryDB.id == category_id
+    ).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if cat.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete default category")
+    db.delete(cat)
+    db.commit()
+    return {"message": "Category deleted"}
+
+# =====================
+#EXPENSE ROUTES
+# =====================
+
+@app.get("/expenses/{user_id}")
+def get_expenses(user_id: int, month: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.ExpenseDB).filter(models.ExpenseDB.user_id == user_id)
+    if month:
+        query = query.filter(models.ExpenseDB.month == month)
+    return query.all()
+
+@app.post("/expenses", response_model=Expense)
+def add_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
+    new_expense = models.ExpenseDB(**expense.dict())
+    db.add(new_expense)
+    db.commit()
+    db.refresh(new_expense)
+    return new_expense
+
+@app.delete("/expenses/{expense_id}")
+def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+    expense = db.query(models.ExpenseDB).filter(
+        models.ExpenseDB.id == expense_id
+    ).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    db.delete(expense)
+    db.commit()
+    return {"message": "Expense deleted"}
+
+# =====================
+#BUDGET OVERVIEW
+# =====================
+
+@app.get("/budget/overview/{user_id}")
+def get_overview(user_id: int, month: str, db: Session = Depends(get_db)):
+    stipend = db.query(models.StipendDB).filter(
+        models.StipendDB.user_id == user_id
+    ).first()
+    stipend_amount = stipend.amount if stipend else 7000.0
+
+    expenses = db.query(models.ExpenseDB).filter(
+        models.ExpenseDB.user_id == user_id,
+        models.ExpenseDB.month == month
+    ).all()
+
+    categories = db.query(models.BudgetCategoryDB).filter(
+        models.BudgetCategoryDB.user_id == user_id
+    ).all()
+
+    total_spent = sum(e.amount for e in expenses)
+    remaining = stipend_amount - total_spent
+
+    # per category breakdown
+    breakdown = []
+    for cat in categories:
+        cat_expenses = [e for e in expenses if e.category_id == cat.id]
+        spent = sum(e.amount for e in cat_expenses)
+        breakdown.append({
+            "id": cat.id,
+            "name": cat.name,
+            "limit": cat.limit,
+            "spent": spent,
+            "exceeded": cat.limit > 0 and spent > cat.limit
+        })
+
+    # monthly history — last 6 months
+    from datetime import datetime, timedelta
+    history = []
+    for i in range(5, -1, -1):
+        d = datetime.now().replace(day=1) - timedelta(days=i*30)
+        m = d.strftime("%Y-%m")
+        m_expenses = db.query(models.ExpenseDB).filter(
+            models.ExpenseDB.user_id == user_id,
+            models.ExpenseDB.month == m
+        ).all()
+        history.append({"month": m, "spent": sum(e.amount for e in m_expenses)})
+
+    return {
+        "stipend": stipend_amount,
+        "total_spent": total_spent,
+        "remaining": remaining,
+        "breakdown": breakdown,
+        "history": history
+    }
+
+# =====================
+#ADMIN — view student budget
+# =====================
+
+@app.get("/admin/budget/{user_id}")
+def admin_view_budget(user_id: int, month: str, db: Session = Depends(get_db)):
+    return get_overview(user_id, month, db)
